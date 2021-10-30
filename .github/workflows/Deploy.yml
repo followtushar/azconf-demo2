@@ -20,5 +20,5 @@ jobs:
         subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION }}
         resourceGroupName: ${{ secrets.AZURE_RG }}
         template: ./main.bicep
-        parameters: storagePrefix=mystore
+        parameters: virtualMachineSize= Ds1V2, storageAccountType=Standard_LRS, adminUsername= tushar, adminPassword= ${{ secrets.PASSWORD }}
         failOnStdErr: false
