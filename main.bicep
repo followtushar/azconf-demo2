@@ -1,4 +1,4 @@
-aram virtualMachineSize string
+param virtualMachineSize string
 param adminUsername string
 
 @secure()
@@ -13,9 +13,9 @@ var virtualNetworkName = 'virtualNetwork'
 var subnet1Name = 'subnet-1'
 var subnet2Name = 'subnet-2'
 var publicIPAddressName = 'publicIp'
-var diagStorageAccountName = concat('diags', uniqueString(resourceGroup().id))
+var diagStorageAccountName = 'diags${resourceGroup().id}'
 var networkSecurityGroupName = 'NSG'
-var networkSecurityGroupName2 = concat(subnet2Name, '-nsg')
+var networkSecurityGroupName2 = '${subnet2Name}-nsg'
 
 // This is the virtual machine that you're building.
 resource vm 'Microsoft.Compute/virtualMachines@2020-06-01' = {
