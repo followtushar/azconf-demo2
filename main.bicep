@@ -17,6 +17,9 @@ var diagStorageAccountName = 'diags${resourceGroup().id}'
 var networkSecurityGroupName = 'NSG'
 var networkSecurityGroupName2 = '${subnet2Name}-nsg'
 
+
+
+
 // This is the virtual machine that you're building.
 resource vm 'Microsoft.Compute/virtualMachines@2020-06-01' = {
   name: virtualMachineName

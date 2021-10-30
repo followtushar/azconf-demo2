@@ -18,7 +18,7 @@ jobs:
       uses: azure/arm-deploy@v1
       with:
         subscriptionId: b7542f61-17b6-491f-9663-40a32fe2b541
-        resourceGroupName: Azconf-RG
+        resourceGroup: Azconf-RG
         template: ./main.bicep
         parameters: virtualMachineSize=Standard_D1, storageAccountType=Standard_LRS, adminUsername= tushar, adminPassword= ${{ secrets.PASSWORD }}
         failOnStdErr: false
