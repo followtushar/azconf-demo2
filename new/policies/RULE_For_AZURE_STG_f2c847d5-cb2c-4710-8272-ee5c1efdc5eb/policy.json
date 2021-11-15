@@ -1,0 +1,64 @@
+{
+ "properties": {
+  "displayName": "RULE_For_AZURE_STG",
+  "policyType": "Custom",
+  "mode": "Indexed",
+  "description": "Storage",
+  "metadata": {
+   "category": "Storage",
+   "createdBy": "7dad414d-e74a-4004-a190-d8252580597c",
+   "createdOn": "2021-11-04T16:22:56.3839772Z",
+   "updatedBy": "7dad414d-e74a-4004-a190-d8252580597c",
+   "updatedOn": "2021-11-04T16:56:55.0090157Z"
+  },
+  "parameters": {
+   "effect": {
+    "type": "String",
+    "metadata": {
+     "displayName": "Effect",
+     "description": "Enable or disable the execution of the audit policy"
+    },
+    "allowedValues": [
+     "Audit",
+     "Deny",
+     "Disabled"
+    ],
+    "defaultValue": "Audit"
+   }
+  },
+  "policyRule": {
+   "if": {
+    "allOf": [
+     {
+      "field": "type",
+      "equals": "Microsoft.Storage/storageAccounts"
+     },
+     {
+      "field": "tags['Env']",
+      "equals": "Prod"
+     },
+     {
+      "anyOf": [
+       {
+        "field": "Microsoft.Storage/storageAccounts/networkAcls.defaultAction",
+        "notEquals": "Deny"
+       },
+       {
+        "count": {
+         "field": "Microsoft.Storage/storageAccounts/networkAcls.ipRules[*]"
+        },
+        "greaterOrEquals": 1
+       }
+      ]
+     }
+    ]
+   },
+   "then": {
+    "effect": "[parameters('effect')]"
+   }
+  }
+ },
+ "id": "/subscriptions/b7542f61-17b6-491f-9663-40a32fe2b541/providers/Microsoft.Authorization/policyDefinitions/f2c847d5-cb2c-4710-8272-ee5c1efdc5eb",
+ "type": "Microsoft.Authorization/policyDefinitions",
+ "name": "f2c847d5-cb2c-4710-8272-ee5c1efdc5eb"
+}
