@@ -1,0 +1,397 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  role      UserRole
+  tenantId  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  manualConfirmations ManualConfirmation[]
+  activityLogs        ActivityLog[]
+  reports             ComplianceReport[]
+  notificationSettings NotificationSettings?
+  auditLogs           AuditLog[]
+
+  @@map("users")
+}
+
+model ComplianceControl {
+  id                   String            @id @default(cuid())
+  controlId            String            @unique // e.g., "AC-2", "CIS-1.1.1"
+  name                 String
+  description          String
+  framework            ComplianceFramework
+  category             String
+  severity             Severity
+  status               ControlStatus
+  lastChecked          DateTime
+  relatedEntraSettings String[]
+  tags                 String[]
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  // Relations
+  evidence            ControlEvidence[]
+  remediation         RemediationAction?
+  manualConfirmations ManualConfirmation[]
+  reportControls      ReportControl[]
+  trends              ComplianceTrend[]
+
+  @@map("compliance_controls")
+}
+
+model ControlEvidence {
+  id        String      @id @default(cuid())
+  type      EvidenceType
+  source    String
+  data      Json
+  timestamp DateTime
+  verified  Boolean     @default(false)
+  controlId String
+  createdAt DateTime    @default(now())
+
+  // Relations
+  control ComplianceControl @relation(fields: [controlId], references: [id], onDelete: Cascade)
+
+  @@map("control_evidence")
+}
+
+model RemediationAction {
+  id              String           @id @default(cuid())
+  type            RemediationType
+  title           String
+  description     String
+  steps           Json // Array of RemediationStep
+  estimatedTime   Int              // in minutes
+  riskLevel       RiskLevel
+  requiresApproval Boolean         @default(false)
+  automatable     Boolean          @default(false)
+  controlId       String           @unique
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  // Relations
+  control ComplianceControl @relation(fields: [controlId], references: [id], onDelete: Cascade)
+  jobs    RemediationJob[]
+
+  @@map("remediation_actions")
+}
+
+model RemediationJob {
+  id               String           @id @default(cuid())
+  status           JobStatus
+  progress         Int              @default(0)
+  startedAt        DateTime         @default(now())
+  completedAt      DateTime?
+  error            String?
+  changes          Json?
+  rollbackAvailable Boolean         @default(false)
+  remediationId    String
+  userId           String
+  createdAt        DateTime         @default(now())
+
+  // Relations
+  remediation RemediationAction @relation(fields: [remediationId], references: [id], onDelete: Cascade)
+
+  @@map("remediation_jobs")
+}
+
+model ManualConfirmation {
+  id            String    @id @default(cuid())
+  controlId     String
+  confirmedBy   String
+  confirmedAt   DateTime  @default(now())
+  justification String
+  evidence      String?
+  expiresAt     DateTime?
+  createdAt     DateTime  @default(now())
+
+  // Relations
+  control ComplianceControl @relation(fields: [controlId], references: [id], onDelete: Cascade)
+  user    User              @relation(fields: [confirmedBy], references: [id])
+
+  @@map("manual_confirmations")
+}
+
+model ComplianceReport {
+  id           String              @id @default(cuid())
+  name         String
+  frameworks   ComplianceFramework[]
+  generatedAt  DateTime            @default(now())
+  generatedBy  String
+  summary      Json                // ComplianceSummary
+  exportFormat ExportFormat
+  downloadUrl  String?
+  status       ReportStatus        @default(GENERATING)
+  createdAt    DateTime            @default(now())
+
+  // Relations
+  user     User            @relation(fields: [generatedBy], references: [id])
+  controls ReportControl[]
+
+  @@map("compliance_reports")
+}
+
+model ReportControl {
+  id       String @id @default(cuid())
+  reportId String
+  controlId String
+
+  // Relations
+  report  ComplianceReport  @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  control ComplianceControl @relation(fields: [controlId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, controlId])
+  @@map("report_controls")
+}
+
+model ActivityLog {
+  id          String      @id @default(cuid())
+  type        ActivityType
+  description String
+  userId      String
+  userName    String
+  timestamp   DateTime    @default(now())
+  metadata    Json?
+
+  // Relations
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("activity_logs")
+}
+
+model SecurityAlert {
+  id              String        @id @default(cuid())
+  type            AlertType
+  severity        AlertSeverity
+  title           String
+  description     String
+  controlId       String?
+  acknowledged    Boolean       @default(false)
+  acknowledgedBy  String?
+  acknowledgedAt  DateTime?
+  createdAt       DateTime      @default(now())
+
+  @@map("security_alerts")
+}
+
+model ComplianceTrend {
+  id              String              @id @default(cuid())
+  date            DateTime
+  complianceScore Float
+  framework       ComplianceFramework
+  passedControls  Int
+  failedControls  Int
+  totalControls   Int
+  controlId       String?
+  createdAt       DateTime            @default(now())
+
+  // Relations
+  control ComplianceControl? @relation(fields: [controlId], references: [id])
+
+  @@unique([date, framework])
+  @@map("compliance_trends")
+}
+
+model NotificationSettings {
+  id                    String             @id @default(cuid())
+  userId                String             @unique
+  emailNotifications    Boolean            @default(true)
+  teamsNotifications    Boolean            @default(false)
+  weeklyDigest          Boolean            @default(true)
+  thresholdAlerts       Boolean            @default(true)
+  complianceThreshold   Float              @default(75.0)
+  notificationTypes     NotificationType[]
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_settings")
+}
+
+model Integration {
+  id            String            @id @default(cuid())
+  type          IntegrationType
+  name          String
+  enabled       Boolean           @default(true)
+  configuration Json
+  lastSync      DateTime?
+  status        IntegrationStatus @default(DISCONNECTED)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@map("integrations")
+}
+
+model ControlMapping {
+  id                String              @id @default(cuid())
+  sourceFramework   ComplianceFramework
+  targetFramework   ComplianceFramework
+  sourceControlId   String
+  targetControlId   String
+  mappingType       MappingType
+  confidence        Float               // 0-1
+  createdAt         DateTime            @default(now())
+
+  @@unique([sourceFramework, targetFramework, sourceControlId, targetControlId])
+  @@map("control_mappings")
+}
+
+model AuditLog {
+  id           String        @id @default(cuid())
+  timestamp    DateTime      @default(now())
+  userId       String
+  userName     String
+  action       String
+  resourceType String
+  resourceId   String
+  changes      Json          // Array of AuditChange
+  ipAddress    String
+  userAgent    String
+  result       AuditResult
+
+  // Relations
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("audit_logs")
+}
+
+// Enums
+enum UserRole {
+  ADMIN
+  COMPLIANCE_OFFICER
+  VIEWER
+}
+
+enum ComplianceFramework {
+  NIST_SP_800_53
+  CIS_MICROSOFT_365
+  ISO_27001
+  GDPR
+  HIPAA
+  CUSTOM
+}
+
+enum ControlStatus {
+  PASSED
+  FAILED
+  NOT_CONFIGURED
+  MANUAL_CONFIRMATION
+  FALSE_POSITIVE
+}
+
+enum Severity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum EvidenceType {
+  API_RESPONSE
+  CONFIGURATION
+  LOG
+  SCREENSHOT
+  DOCUMENT
+}
+
+enum RemediationType {
+  API_CALL
+  POWERSHELL_SCRIPT
+  MANUAL_GUIDE
+  CONFIGURATION_TEMPLATE
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum ExportFormat {
+  PDF
+  EXCEL
+  JSON
+}
+
+enum ReportStatus {
+  GENERATING
+  READY
+  FAILED
+}
+
+enum ActivityType {
+  CONTROL_CHECK
+  REMEDIATION
+  MANUAL_CONFIRMATION
+  REPORT_GENERATION
+}
+
+enum AlertType {
+  NEW_FAILURE
+  COMPLIANCE_DROP
+  CONTROL_EXPIRED
+  REMEDIATION_FAILED
+}
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  ERROR
+  CRITICAL
+}
+
+enum NotificationType {
+  NEW_FAILURES
+  COMPLIANCE_DROP
+  REMEDIATION_SUCCESS
+  WEEKLY_DIGEST
+  CONTROL_EXPIRY
+}
+
+enum IntegrationType {
+  DEFENDER_CLOUD
+  COMPLIANCE_MANAGER
+  LOG_ANALYTICS
+  CUSTOM
+}
+
+enum IntegrationStatus {
+  CONNECTED
+  DISCONNECTED
+  ERROR
+}
+
+enum MappingType {
+  EXACT
+  PARTIAL
+  RELATED
+}
+
+enum AuditResult {
+  SUCCESS
+  FAILURE
+}
