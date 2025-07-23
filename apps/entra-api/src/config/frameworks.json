@@ -1,0 +1,199 @@
+{
+  "frameworks": [
+    {
+      "id": "nist-sp-800-53",
+      "name": "NIST SP 800-53",
+      "version": "Rev 5",
+      "description": "Security and Privacy Controls for Federal Information Systems and Organizations",
+      "category": "Security Framework",
+      "controls": [
+        {
+          "id": "AC-2",
+          "name": "Account Management",
+          "description": "Manage information system accounts",
+          "family": "Access Control",
+          "priority": "high",
+          "mappings": {
+            "entra": ["conditionalAccess", "userManagement", "groupManagement"]
+          }
+        },
+        {
+          "id": "AC-3",
+          "name": "Access Enforcement",
+          "description": "Enforce approved authorizations for logical access",
+          "family": "Access Control",
+          "priority": "high",
+          "mappings": {
+            "entra": ["conditionalAccess", "roleBasedAccess"]
+          }
+        },
+        {
+          "id": "IA-2",
+          "name": "Identification and Authentication (Organizational Users)",
+          "description": "Uniquely identify and authenticate organizational users",
+          "family": "Identification and Authentication",
+          "priority": "high",
+          "mappings": {
+            "entra": ["mfaSettings", "authenticationMethods"]
+          }
+        },
+        {
+          "id": "IA-5",
+          "name": "Authenticator Management",
+          "description": "Manage information system authenticators",
+          "family": "Identification and Authentication",
+          "priority": "high",
+          "mappings": {
+            "entra": ["passwordPolicies", "mfaSettings"]
+          }
+        },
+        {
+          "id": "AU-2",
+          "name": "Event Logging",
+          "description": "Ensure that the events are logged",
+          "family": "Audit and Accountability",
+          "priority": "medium",
+          "mappings": {
+            "entra": ["auditLogs", "signInLogs"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "iso-27001",
+      "name": "ISO/IEC 27001",
+      "version": "2022",
+      "description": "Information Security Management Systems",
+      "category": "Security Standard",
+      "controls": [
+        {
+          "id": "A.9.1.1",
+          "name": "Access control policy",
+          "description": "An access control policy should be established, documented and reviewed",
+          "family": "Access Control",
+          "priority": "high",
+          "mappings": {
+            "entra": ["conditionalAccess", "accessReviews"]
+          }
+        },
+        {
+          "id": "A.9.2.1",
+          "name": "User registration and de-registration",
+          "description": "A formal user registration and de-registration process should be implemented",
+          "family": "Access Control",
+          "priority": "high",
+          "mappings": {
+            "entra": ["userLifecycleManagement", "provisioning"]
+          }
+        },
+        {
+          "id": "A.9.4.2",
+          "name": "Secure log-on procedures",
+          "description": "Where required by the access control policy, access to systems and applications should be controlled by a secure log-on procedure",
+          "family": "Access Control",
+          "priority": "high",
+          "mappings": {
+            "entra": ["mfaSettings", "conditionalAccess"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "cis-microsoft-365",
+      "name": "CIS Microsoft 365",
+      "version": "3.0.0",
+      "description": "CIS Controls for Microsoft 365",
+      "category": "Security Benchmark",
+      "controls": [
+        {
+          "id": "1.1.1",
+          "name": "Ensure multifactor authentication is enabled for all users",
+          "description": "Enable MFA for all user accounts",
+          "family": "Account Management",
+          "priority": "high",
+          "mappings": {
+            "entra": ["mfaSettings", "conditionalAccess"]
+          }
+        },
+        {
+          "id": "1.1.3",
+          "name": "Ensure that between 2 and 4 global admins are designated",
+          "description": "Limit the number of global administrators",
+          "family": "Account Management",
+          "priority": "high",
+          "mappings": {
+            "entra": ["privilegedRoles", "roleAssignments"]
+          }
+        },
+        {
+          "id": "1.2.1",
+          "name": "Ensure Security Defaults is disabled on Azure Active Directory",
+          "description": "Disable security defaults to implement conditional access",
+          "family": "Configuration Management",
+          "priority": "medium",
+          "mappings": {
+            "entra": ["securityDefaults", "conditionalAccess"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "gdpr",
+      "name": "GDPR",
+      "version": "2018",
+      "description": "General Data Protection Regulation",
+      "category": "Privacy Regulation",
+      "controls": [
+        {
+          "id": "Art.32",
+          "name": "Security of processing",
+          "description": "Implement appropriate technical and organizational measures",
+          "family": "Data Security",
+          "priority": "high",
+          "mappings": {
+            "entra": ["dataProtection", "encryption", "accessControls"]
+          }
+        },
+        {
+          "id": "Art.25",
+          "name": "Data protection by design and by default",
+          "description": "Implement data protection principles by design and by default",
+          "family": "Data Protection",
+          "priority": "high",
+          "mappings": {
+            "entra": ["privacySettings", "dataClassification"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "hipaa",
+      "name": "HIPAA",
+      "version": "2013",
+      "description": "Health Insurance Portability and Accountability Act",
+      "category": "Healthcare Regulation",
+      "controls": [
+        {
+          "id": "164.308(a)(3)",
+          "name": "Assigned Security Responsibility",
+          "description": "Assign security responsibility to a specific individual",
+          "family": "Administrative Safeguards",
+          "priority": "high",
+          "mappings": {
+            "entra": ["roleAssignments", "privilegedAccess"]
+          }
+        },
+        {
+          "id": "164.308(a)(5)",
+          "name": "Access Management",
+          "description": "Implement procedures for granting access to electronic protected health information",
+          "family": "Administrative Safeguards",
+          "priority": "high",
+          "mappings": {
+            "entra": ["conditionalAccess", "accessReviews"]
+          }
+        }
+      ]
+    }
+  ]
+}

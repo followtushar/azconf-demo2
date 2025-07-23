@@ -9,10 +9,12 @@
   ],
   "scripts": {
     "setup": "npm install && npm run db:setup",
-    "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\" \"npm run dev:queue\"",
+    "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\" \"npm run dev:queue\" \"npm run dev:entra-api\" \"npm run dev:entra-web\"",
     "dev:api": "npm run dev --workspace=apps/api",
     "dev:web": "npm run dev --workspace=apps/web",
     "dev:queue": "npm run dev --workspace=apps/queue-worker",
+    "dev:entra-api": "npm run dev --workspace=apps/entra-api",
+    "dev:entra-web": "npm run dev --workspace=apps/entra-management",
     "build": "npm run build --workspaces",
     "test": "npm run test --workspaces",
     "test:unit": "npm run test:unit --workspaces",
