@@ -1,0 +1,72 @@
+{
+  "name": "timecap-app",
+  "version": "1.0.0",
+  "description": "A comprehensive time capsule application for scheduling future message delivery",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "mobile",
+    "backend",
+    "services/*",
+    "shared"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\" \"npm run dev:services\"",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev:mobile": "npm run dev --workspace=mobile",
+    "dev:services": "npm run dev --workspace=services/media && npm run dev --workspace=services/scheduler && npm run dev --workspace=services/notifications",
+    "build": "npm run build --workspaces",
+    "build:frontend": "npm run build --workspace=frontend",
+    "build:backend": "npm run build --workspace=backend",
+    "build:mobile": "npm run build --workspace=mobile",
+    "test": "npm run test --workspaces",
+    "test:watch": "npm run test:watch --workspaces",
+    "lint": "eslint . --ext .ts,.tsx,.js,.jsx",
+    "lint:fix": "eslint . --ext .ts,.tsx,.js,.jsx --fix",
+    "type-check": "npm run type-check --workspaces",
+    "clean": "npm run clean --workspaces && rm -rf node_modules",
+    "setup": "npm install && npm run setup --workspaces",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f",
+    "db:migrate": "npm run db:migrate --workspace=backend",
+    "db:seed": "npm run db:seed --workspace=backend",
+    "db:reset": "npm run db:reset --workspace=backend",
+    "deploy:staging": "npm run build && npm run deploy:staging --workspaces",
+    "deploy:production": "npm run build && npm run deploy:production --workspaces"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "concurrently": "^8.2.2",
+    "eslint": "^8.55.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.0.1",
+    "prettier": "^3.1.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/timecap-app.git"
+  },
+  "keywords": [
+    "time-capsule",
+    "messaging",
+    "scheduling",
+    "audio",
+    "video",
+    "future-delivery",
+    "react",
+    "react-native",
+    "nodejs",
+    "typescript"
+  ],
+  "author": "TimeCap Team",
+  "license": "MIT"
+}

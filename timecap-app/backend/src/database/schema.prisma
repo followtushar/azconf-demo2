@@ -1,0 +1,224 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String    @id @default(uuid())
+  email             String    @unique
+  username          String    @unique
+  firstName         String
+  lastName          String
+  avatar            String?
+  phone             String?
+  timezone          String    @default("UTC")
+  isEmailVerified   Boolean   @default(false)
+  isPhoneVerified   Boolean   @default(false)
+  twoFactorEnabled  Boolean   @default(false)
+  twoFactorSecret   String?
+  passwordHash      String
+  lastLoginAt       DateTime?
+  emailVerificationToken String?
+  emailVerificationExpires DateTime?
+  passwordResetToken String?
+  passwordResetExpires DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // OAuth providers
+  googleId          String?
+  facebookId        String?
+  appleId           String?
+
+  // Relationships
+  capsules          Capsule[]
+  notifications     Notification[]
+  legacyContacts    LegacyContact[]
+  userSessions      UserSession[]
+  auditLogs         AuditLog[]
+
+  @@map("users")
+}
+
+model Capsule {
+  id                String        @id @default(uuid())
+  userId            String
+  title             String
+  description       String?
+  status            CapsuleStatus @default(DRAFT)
+  privacy           CapsulePrivacy @default(PRIVATE)
+  scheduledFor      DateTime
+  deliveredAt       DateTime?
+  timezone          String
+  isRecurring       Boolean       @default(false)
+  recurringPattern  String?
+  tags              String[]      @default([])
+  emotionalTag      String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  // Relationships
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  media             Media[]
+  recipients        Recipient[]
+
+  @@map("capsules")
+}
+
+model Media {
+  id                String    @id @default(uuid())
+  capsuleId         String
+  type              MediaType
+  filename          String
+  originalName      String
+  mimeType          String
+  size              Int
+  duration          Int?      // in seconds for audio/video
+  url               String
+  thumbnailUrl      String?
+  transcription     String?
+  isEncrypted       Boolean   @default(true)
+  encryptionKey     String?
+  metadata          Json?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relationships
+  capsule           Capsule   @relation(fields: [capsuleId], references: [id], onDelete: Cascade)
+
+  @@map("media")
+}
+
+model Recipient {
+  id                String        @id @default(uuid())
+  capsuleId         String
+  type              RecipientType
+  value             String        // email, phone, userId
+  name              String?
+  isDelivered       Boolean       @default(false)
+  deliveredAt       DateTime?
+  failureReason     String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  // Relationships
+  capsule           Capsule       @relation(fields: [capsuleId], references: [id], onDelete: Cascade)
+
+  @@map("recipients")
+}
+
+model Notification {
+  id                String            @id @default(uuid())
+  userId            String
+  type              NotificationType
+  title             String
+  message           String
+  data              Json?
+  isRead            Boolean           @default(false)
+  sentAt            DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  // Relationships
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model LegacyContact {
+  id                String    @id @default(uuid())
+  userId            String
+  email             String
+  name              String
+  relationship      String
+  isVerified        Boolean   @default(false)
+  verificationToken String?
+  activationDelay   Int       @default(365) // days
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relationships
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("legacy_contacts")
+}
+
+model UserSession {
+  id                String    @id @default(uuid())
+  userId            String
+  token             String    @unique
+  refreshToken      String    @unique
+  deviceInfo        String?
+  ipAddress         String?
+  userAgent         String?
+  isActive          Boolean   @default(true)
+  expiresAt         DateTime
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relationships
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_sessions")
+}
+
+model AuditLog {
+  id                String    @id @default(uuid())
+  userId            String?
+  action            String
+  resource          String
+  resourceId        String?
+  details           Json?
+  ipAddress         String?
+  userAgent         String?
+  createdAt         DateTime  @default(now())
+
+  // Relationships
+  user              User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+}
+
+// Enums
+enum CapsuleStatus {
+  DRAFT
+  SCHEDULED
+  DELIVERED
+  CANCELLED
+  FAILED
+}
+
+enum CapsulePrivacy {
+  PRIVATE
+  PUBLIC
+  RECIPIENTS_ONLY
+}
+
+enum MediaType {
+  AUDIO
+  VIDEO
+  IMAGE
+  TEXT
+}
+
+enum RecipientType {
+  EMAIL
+  SMS
+  PUSH
+  USER
+}
+
+enum NotificationType {
+  CAPSULE_DELIVERED
+  CAPSULE_REMINDER
+  CAPSULE_FAILED
+  ACCOUNT_VERIFICATION
+  SECURITY_ALERT
+}
