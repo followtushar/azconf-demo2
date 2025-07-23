@@ -1,0 +1,228 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String    @id @default(uuid())
+  email             String    @unique
+  username          String    @unique
+  firstName         String
+  lastName          String
+  password          String?
+  profilePicture    String?
+  isEmailVerified   Boolean   @default(false)
+  emailVerifiedAt   DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  lastLoginAt       DateTime?
+  isActive          Boolean   @default(true)
+  
+  // Preferences stored as JSON
+  timezone          String    @default("UTC")
+  theme             String    @default("light")
+  language          String    @default("en")
+  
+  // Notification preferences
+  emailNotifications Boolean  @default(true)
+  smsNotifications   Boolean  @default(false)
+  pushNotifications  Boolean  @default(true)
+  reminderDays       Int[]    @default([1, 7])
+  
+  // Privacy settings
+  defaultVisibility String   @default("private")
+  allowDiscovery    Boolean  @default(false)
+  showActivity      Boolean  @default(true)
+  
+  // Relations
+  capsules          Capsule[]
+  recipients        CapsuleRecipient[]
+  notifications     Notification[]
+  oauthAccounts     OAuthAccount[]
+  sessions          Session[]
+  legacyContacts    LegacyContact[]
+  
+  @@map("users")
+}
+
+model OAuthAccount {
+  id           String @id @default(uuid())
+  userId       String
+  provider     String
+  providerAccountId String
+  accessToken  String?
+  refreshToken String?
+  expiresAt    DateTime?
+  createdAt    DateTime @default(now())
+  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([provider, providerAccountId])
+  @@map("oauth_accounts")
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  userId       String
+  token        String   @unique
+  refreshToken String   @unique
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  lastUsedAt   DateTime @default(now())
+  ipAddress    String?
+  userAgent    String?
+  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("sessions")
+}
+
+model Capsule {
+  id            String   @id @default(uuid())
+  title         String
+  description   String?
+  creatorId     String
+  scheduledFor  DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deliveredAt   DateTime?
+  visibility    String   @default("private") // private, public, recipients_only
+  status        String   @default("draft")   // draft, scheduled, delivered, cancelled, failed
+  tags          String[] @default([])
+  encryptionKey String?
+  
+  // Legacy settings as JSON
+  legacyEnabled    Boolean @default(false)
+  legacyThreshold  Int     @default(365) // days
+  
+  // Relations
+  creator      User               @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  mediaFiles   MediaFile[]
+  recipients   CapsuleRecipient[]
+  jobs         ScheduledJob[]
+  legacyContacts LegacyContact[]
+  
+  @@map("capsules")
+}
+
+model CapsuleRecipient {
+  id          String    @id @default(uuid())
+  capsuleId   String
+  type        String    // email, sms, user, self
+  identifier  String    // email, phone, or user ID
+  name        String?
+  deliveredAt DateTime?
+  viewedAt    DateTime?
+  status      String    @default("pending") // pending, sent, delivered, viewed, failed
+  
+  // Relations
+  capsule Capsule @relation(fields: [capsuleId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [identifier], references: [id], onDelete: SetNull)
+  
+  @@map("capsule_recipients")
+}
+
+model MediaFile {
+  id           String   @id @default(uuid())
+  capsuleId    String
+  filename     String
+  originalName String
+  mimeType     String
+  size         Int
+  duration     Int?     // for audio/video in seconds
+  url          String
+  thumbnailUrl String?
+  type         String   // audio, video, image, document
+  uploadedAt   DateTime @default(now())
+  
+  // Metadata as JSON
+  width   Int?
+  height  Int?
+  bitrate Int?
+  codec   String?
+  format  String?
+  
+  // Relations
+  capsule Capsule @relation(fields: [capsuleId], references: [id], onDelete: Cascade)
+  
+  @@map("media_files")
+}
+
+model LegacyContact {
+  id           String @id @default(uuid())
+  userId       String?
+  capsuleId    String?
+  name         String
+  email        String
+  relationship String
+  createdAt    DateTime @default(now())
+  
+  // Relations
+  user    User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  capsule Capsule? @relation(fields: [capsuleId], references: [id], onDelete: Cascade)
+  
+  @@map("legacy_contacts")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  type      String   // capsule_delivered, capsule_reminder, capsule_failed, etc.
+  title     String
+  message   String
+  data      Json?    // Additional data as JSON
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("notifications")
+}
+
+model ScheduledJob {
+  id          String   @id @default(uuid())
+  type        String   // deliver_capsule, send_reminder, process_media, etc.
+  data        Json     // Job data as JSON
+  scheduledFor DateTime
+  attempts    Int      @default(0)
+  maxAttempts Int      @default(3)
+  status      String   @default("pending") // pending, processing, completed, failed, cancelled
+  createdAt   DateTime @default(now())
+  processedAt DateTime?
+  error       String?
+  
+  // Relations
+  capsuleId String?
+  capsule   Capsule? @relation(fields: [capsuleId], references: [id], onDelete: Cascade)
+  
+  @@map("scheduled_jobs")
+}
+
+model EmailVerification {
+  id        String   @id @default(uuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  
+  @@map("email_verifications")
+}
+
+model PasswordReset {
+  id        String   @id @default(uuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  usedAt    DateTime?
+  
+  @@map("password_resets")
+}
