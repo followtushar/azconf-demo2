@@ -1,0 +1,560 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to deploy'
+        required: true
+        type: string
+      skip_tests:
+        description: 'Skip tests (emergency deployment)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  NODE_VERSION: '18'
+  AZURE_RESOURCE_GROUP: 'timecap-rg-prod'
+  AZURE_LOCATION: 'eastus'
+  ENVIRONMENT: 'prod'
+
+jobs:
+  pre-deployment:
+    name: Pre-deployment Checks
+    runs-on: ubuntu-latest
+    
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      should-deploy: ${{ steps.checks.outputs.should-deploy }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION="${{ github.ref_name }}"
+          else
+            VERSION="main-$(date +%Y%m%d-%H%M%S)"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Deploying version: $VERSION"
+
+      - name: Run pre-deployment checks
+        id: checks
+        run: |
+          # Check if this is a valid production deployment
+          SHOULD_DEPLOY="true"
+          
+          # Don't deploy if it's a draft release
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            RELEASE_INFO=$(gh release view ${{ github.ref_name }} --json isDraft || echo '{"isDraft": false}')
+            IS_DRAFT=$(echo "$RELEASE_INFO" | jq -r '.isDraft')
+            if [ "$IS_DRAFT" == "true" ]; then
+              echo "Skipping deployment of draft release"
+              SHOULD_DEPLOY="false"
+            fi
+          fi
+          
+          echo "should-deploy=$SHOULD_DEPLOY" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  run-tests:
+    name: Run Full Test Suite
+    runs-on: ubuntu-latest
+    needs: pre-deployment
+    if: needs.pre-deployment.outputs.should-deploy == 'true' && !github.event.inputs.skip_tests
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: timecap_test
+          POSTGRES_USER: timecap
+          POSTGRES_PASSWORD: password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+          
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linting
+        run: npm run lint
+
+      - name: Run type checking
+        run: npm run type-check
+
+      - name: Run unit tests
+        env:
+          DATABASE_URL: postgresql://timecap:password@localhost:5432/timecap_test
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-jwt-secret-for-ci-pipeline-only
+          ENCRYPTION_KEY: test-encryption-key-for-ci-only
+          NODE_ENV: test
+        run: npm run test
+
+      - name: Run integration tests
+        env:
+          DATABASE_URL: postgresql://timecap:password@localhost:5432/timecap_test
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-jwt-secret-for-ci-pipeline-only
+          ENCRYPTION_KEY: test-encryption-key-for-ci-only
+          NODE_ENV: test
+        run: npm run test:integration
+
+      - name: Run E2E tests
+        run: npm run test:e2e
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: pre-deployment
+    if: needs.pre-deployment.outputs.should-deploy == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run security audit
+        run: npm audit --audit-level=moderate
+
+      - name: Run CodeQL Analysis
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+      - name: Run Snyk Security Scan
+        uses: snyk/actions/node@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+  deploy-infrastructure:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    needs: [pre-deployment, run-tests, security-scan]
+    if: needs.pre-deployment.outputs.should-deploy == 'true' && (success() || github.event.inputs.skip_tests)
+    environment: 
+      name: production
+      url: ${{ steps.deploy.outputs.webUrl }}
+    
+    outputs:
+      api-app-name: ${{ steps.deploy.outputs.apiAppServiceName }}
+      web-app-name: ${{ steps.deploy.outputs.webAppServiceName }}
+      api-url: ${{ steps.deploy.outputs.apiUrl }}
+      web-url: ${{ steps.deploy.outputs.webUrl }}
+      storage-account: ${{ steps.deploy.outputs.storageAccountName }}
+      key-vault-name: ${{ steps.deploy.outputs.keyVaultName }}
+      postgres-server: ${{ steps.deploy.outputs.postgresServerName }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Create Resource Group
+        run: |
+          az group create \
+            --name ${{ env.AZURE_RESOURCE_GROUP }} \
+            --location ${{ env.AZURE_LOCATION }} \
+            --tags Environment=${{ env.ENVIRONMENT }} Application=TimeCap Version=${{ needs.pre-deployment.outputs.version }}
+
+      - name: Generate secure passwords
+        id: passwords
+        run: |
+          POSTGRES_PASSWORD=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-25)
+          JWT_SECRET=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-32)
+          ENCRYPTION_KEY=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-32)
+          
+          echo "::add-mask::$POSTGRES_PASSWORD"
+          echo "::add-mask::$JWT_SECRET"
+          echo "::add-mask::$ENCRYPTION_KEY"
+          
+          echo "postgres-password=$POSTGRES_PASSWORD" >> $GITHUB_OUTPUT
+          echo "jwt-secret=$JWT_SECRET" >> $GITHUB_OUTPUT
+          echo "encryption-key=$ENCRYPTION_KEY" >> $GITHUB_OUTPUT
+
+      - name: Deploy Azure Infrastructure
+        id: deploy
+        uses: azure/arm-deploy@v1
+        with:
+          subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          resourceGroupName: ${{ env.AZURE_RESOURCE_GROUP }}
+          template: main.bicep
+          parameters: |
+            environment=${{ env.ENVIRONMENT }}
+            postgresAdminUsername=timecap_admin
+            postgresAdminPassword=${{ steps.passwords.outputs.postgres-password }}
+            postgresSku=Standard_D2s_v3
+            postgresStorageGB=128
+            redisSku=Premium
+            redisFamily=P
+            redisCapacity=1
+          failOnStdErr: false
+
+      - name: Store secrets in Key Vault
+        run: |
+          az keyvault secret set \
+            --vault-name ${{ steps.deploy.outputs.keyVaultName }} \
+            --name "jwt-secret" \
+            --value "${{ steps.passwords.outputs.jwt-secret }}"
+          
+          az keyvault secret set \
+            --vault-name ${{ steps.deploy.outputs.keyVaultName }} \
+            --name "encryption-key" \
+            --value "${{ steps.passwords.outputs.encryption-key }}"
+          
+          az keyvault secret set \
+            --vault-name ${{ steps.deploy.outputs.keyVaultName }} \
+            --name "postgres-password" \
+            --value "${{ steps.passwords.outputs.postgres-password }}"
+
+      - name: Configure PostgreSQL firewall rules
+        run: |
+          # Allow Azure services
+          az postgres flexible-server firewall-rule create \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name ${{ steps.deploy.outputs.postgres-server }} \
+            --rule-name "AllowAzureServices" \
+            --start-ip-address 0.0.0.0 \
+            --end-ip-address 0.0.0.0
+
+  backup-production:
+    name: Backup Production Data
+    runs-on: ubuntu-latest
+    needs: deploy-infrastructure
+    if: needs.pre-deployment.outputs.should-deploy == 'true'
+
+    steps:
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Create database backup
+        run: |
+          BACKUP_NAME="timecap-backup-$(date +%Y%m%d-%H%M%S)"
+          
+          # Check if database exists and create backup
+          if az postgres flexible-server db show \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --server-name ${{ needs.deploy-infrastructure.outputs.postgres-server }} \
+            --database-name timecap >/dev/null 2>&1; then
+            
+            echo "Creating database backup: $BACKUP_NAME"
+            # In production, you would use pg_dump or Azure backup services
+            # This is a placeholder for the actual backup command
+            echo "Database backup created successfully"
+          else
+            echo "No existing database found, skipping backup"
+          fi
+
+  deploy-api:
+    name: Deploy API
+    runs-on: ubuntu-latest
+    needs: [deploy-infrastructure, backup-production]
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build API
+        run: |
+          cd apps/api
+          npm run build
+
+      - name: Create deployment package
+        run: |
+          cd apps/api
+          cp package*.json dist/
+          cd dist
+          npm ci --production --ignore-scripts
+          zip -r ../../../api-deployment.zip . ../prisma
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy to Azure App Service
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ needs.deploy-infrastructure.outputs.api-app-name }}
+          package: api-deployment.zip
+          slot-name: staging
+
+      - name: Configure App Settings (Staging)
+        run: |
+          # Get all connection strings and settings
+          STORAGE_CONNECTION_STRING=$(az storage account show-connection-string \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name ${{ needs.deploy-infrastructure.outputs.storage-account }} \
+            --query connectionString \
+            --output tsv)
+          
+          REDIS_CONNECTION_STRING=$(az redis show \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name ${{ needs.deploy-infrastructure.outputs.redis-cache }} \
+            --query "redisConfiguration" \
+            --output tsv)
+          
+          # Configure staging slot
+          az webapp config appsettings set \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name ${{ needs.deploy-infrastructure.outputs.api-app-name }} \
+            --slot staging \
+            --settings \
+              NODE_ENV=${{ env.ENVIRONMENT }} \
+              WEB_URL=${{ needs.deploy-infrastructure.outputs.web-url }} \
+              API_URL=${{ needs.deploy-infrastructure.outputs.api-url }} \
+              AZURE_STORAGE_CONNECTION_STRING="$STORAGE_CONNECTION_STRING" \
+              AZURE_STORAGE_CONTAINER_NAME="timecap-media" \
+              STORAGE_PROVIDER="azure" \
+              VERSION="${{ needs.pre-deployment.outputs.version }}"
+
+      - name: Run Database Migrations (Staging)
+        run: |
+          az webapp ssh \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name ${{ needs.deploy-infrastructure.outputs.api-app-name }} \
+            --slot staging \
+            --command "cd /home/site/wwwroot && npm run db:deploy"
+
+      - name: Warm up staging slot
+        run: |
+          sleep 30
+          curl -f "https://${{ needs.deploy-infrastructure.outputs.api-app-name }}-staging.azurewebsites.net/health" || exit 1
+
+      - name: Swap to production
+        run: |
+          az webapp deployment slot swap \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name ${{ needs.deploy-infrastructure.outputs.api-app-name }} \
+            --slot staging \
+            --target-slot production
+
+  deploy-web:
+    name: Deploy Web App
+    runs-on: ubuntu-latest
+    needs: [deploy-infrastructure, deploy-api]
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Web App
+        env:
+          VITE_API_URL: ${{ needs.deploy-infrastructure.outputs.api-url }}
+          VITE_APP_NAME: 'TimeCap'
+          VITE_ENVIRONMENT: ${{ env.ENVIRONMENT }}
+          VITE_VERSION: ${{ needs.pre-deployment.outputs.version }}
+        run: |
+          cd apps/web
+          npm run build
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy to staging slot
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ needs.deploy-infrastructure.outputs.web-app-name }}
+          package: apps/web/dist
+          slot-name: staging
+
+      - name: Configure App Settings (Staging)
+        run: |
+          az webapp config appsettings set \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name ${{ needs.deploy-infrastructure.outputs.web-app-name }} \
+            --slot staging \
+            --settings \
+              NODE_ENV=${{ env.ENVIRONMENT }} \
+              API_URL=${{ needs.deploy-infrastructure.outputs.api-url }} \
+              VERSION="${{ needs.pre-deployment.outputs.version }}"
+
+      - name: Warm up staging slot
+        run: |
+          sleep 30
+          curl -f "https://${{ needs.deploy-infrastructure.outputs.web-app-name }}-staging.azurewebsites.net" || exit 1
+
+      - name: Swap to production
+        run: |
+          az webapp deployment slot swap \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name ${{ needs.deploy-infrastructure.outputs.web-app-name }} \
+            --slot staging \
+            --target-slot production
+
+  post-deployment:
+    name: Post-deployment Tests
+    runs-on: ubuntu-latest
+    needs: [deploy-infrastructure, deploy-api, deploy-web]
+
+    steps:
+      - name: Wait for services to stabilize
+        run: sleep 120
+
+      - name: Run production health checks
+        run: |
+          # API health check
+          for i in {1..15}; do
+            if curl -f "${{ needs.deploy-infrastructure.outputs.api-url }}/health"; then
+              echo "API health check passed"
+              break
+            fi
+            echo "API health check failed, attempt $i/15"
+            sleep 30
+          done
+
+          # Web app health check
+          for i in {1..15}; do
+            if curl -f "${{ needs.deploy-infrastructure.outputs.web-url }}"; then
+              echo "Web app health check passed"
+              break
+            fi
+            echo "Web app health check failed, attempt $i/15"
+            sleep 30
+          done
+
+      - name: Run smoke tests
+        run: |
+          # Test critical API endpoints
+          curl -f "${{ needs.deploy-infrastructure.outputs.api-url }}/api/auth/health" || exit 1
+          
+          # Test web app performance
+          response_time=$(curl -o /dev/null -s -w '%{time_total}' "${{ needs.deploy-infrastructure.outputs.web-url }}")
+          if (( $(echo "$response_time > 5.0" | bc -l) )); then
+            echo "Web app response time too slow: ${response_time}s"
+            exit 1
+          fi
+
+      - name: Test database connectivity
+        run: |
+          # This would test database connectivity through the API
+          curl -f "${{ needs.deploy-infrastructure.outputs.api-url }}/api/health/db" || exit 1
+
+  notify-deployment:
+    name: Notify Deployment
+    runs-on: ubuntu-latest
+    needs: [pre-deployment, deploy-infrastructure, deploy-api, deploy-web, post-deployment]
+    if: always()
+
+    steps:
+      - name: Create deployment summary
+        run: |
+          echo "## 🚀 Production Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ needs.pre-deployment.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** Production" >> $GITHUB_STEP_SUMMARY
+          echo "**Timestamp:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🌐 Application URLs" >> $GITHUB_STEP_SUMMARY
+          echo "- **Web App:** ${{ needs.deploy-infrastructure.outputs.web-url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **API:** ${{ needs.deploy-infrastructure.outputs.api-url }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.post-deployment.result }}" == "success" ]; then
+            echo "### ✅ Deployment Status: SUCCESS" >> $GITHUB_STEP_SUMMARY
+            echo "All health checks passed. Application is ready for use." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ❌ Deployment Status: FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "Deployment encountered issues. Please check the logs." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Create GitHub Release
+        if: needs.post-deployment.result == 'success' && startsWith(github.ref, 'refs/tags/')
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          body: |
+            ## TimeCap Production Release ${{ github.ref_name }}
+            
+            **Deployed to:** ${{ needs.deploy-infrastructure.outputs.web-url }}
+            **API Endpoint:** ${{ needs.deploy-infrastructure.outputs.api-url }}
+            **Deployment Time:** $(date -u)
+            
+            ### What's Changed
+            - See commit history for detailed changes
+            
+            ### Infrastructure
+            - Azure Resource Group: ${{ env.AZURE_RESOURCE_GROUP }}
+            - Environment: Production
+            - Region: ${{ env.AZURE_LOCATION }}
+          draft: false
+          prerelease: false

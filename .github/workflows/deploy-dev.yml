@@ -1,0 +1,275 @@
+name: Deploy to Development
+
+on:
+  push:
+    branches: [ develop ]
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: 'Force deployment even if tests fail'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  NODE_VERSION: '18'
+  AZURE_RESOURCE_GROUP: 'timecap-rg-dev'
+  AZURE_LOCATION: 'eastus'
+  ENVIRONMENT: 'dev'
+
+jobs:
+  deploy-infrastructure:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    environment: development
+    
+    outputs:
+      api-app-name: ${{ steps.deploy.outputs.apiAppServiceName }}
+      web-app-name: ${{ steps.deploy.outputs.webAppServiceName }}
+      api-url: ${{ steps.deploy.outputs.apiUrl }}
+      web-url: ${{ steps.deploy.outputs.webUrl }}
+      storage-account: ${{ steps.deploy.outputs.storageAccountName }}
+      key-vault-name: ${{ steps.deploy.outputs.keyVaultName }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Create Resource Group
+        run: |
+          az group create \
+            --name ${{ env.AZURE_RESOURCE_GROUP }} \
+            --location ${{ env.AZURE_LOCATION }} \
+            --tags Environment=${{ env.ENVIRONMENT }} Application=TimeCap
+
+      - name: Generate secure passwords
+        id: passwords
+        run: |
+          POSTGRES_PASSWORD=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-25)
+          JWT_SECRET=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-32)
+          ENCRYPTION_KEY=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-32)
+          
+          echo "::add-mask::$POSTGRES_PASSWORD"
+          echo "::add-mask::$JWT_SECRET"
+          echo "::add-mask::$ENCRYPTION_KEY"
+          
+          echo "postgres-password=$POSTGRES_PASSWORD" >> $GITHUB_OUTPUT
+          echo "jwt-secret=$JWT_SECRET" >> $GITHUB_OUTPUT
+          echo "encryption-key=$ENCRYPTION_KEY" >> $GITHUB_OUTPUT
+
+      - name: Deploy Azure Infrastructure
+        id: deploy
+        uses: azure/arm-deploy@v1
+        with:
+          subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          resourceGroupName: ${{ env.AZURE_RESOURCE_GROUP }}
+          template: main.bicep
+          parameters: |
+            environment=${{ env.ENVIRONMENT }}
+            postgresAdminUsername=timecap_admin
+            postgresAdminPassword=${{ steps.passwords.outputs.postgres-password }}
+          failOnStdErr: false
+
+      - name: Store secrets in Key Vault
+        run: |
+          az keyvault secret set \
+            --vault-name ${{ steps.deploy.outputs.keyVaultName }} \
+            --name "jwt-secret" \
+            --value "${{ steps.passwords.outputs.jwt-secret }}"
+          
+          az keyvault secret set \
+            --vault-name ${{ steps.deploy.outputs.keyVaultName }} \
+            --name "encryption-key" \
+            --value "${{ steps.passwords.outputs.encryption-key }}"
+          
+          az keyvault secret set \
+            --vault-name ${{ steps.deploy.outputs.keyVaultName }} \
+            --name "postgres-password" \
+            --value "${{ steps.passwords.outputs.postgres-password }}"
+
+  deploy-api:
+    name: Deploy API
+    runs-on: ubuntu-latest
+    needs: deploy-infrastructure
+    environment: development
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build API
+        run: |
+          cd apps/api
+          npm run build
+
+      - name: Create deployment package
+        run: |
+          cd apps/api
+          cp package*.json dist/
+          cd dist
+          npm ci --production
+          zip -r ../../../api-deployment.zip . ../prisma
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy to Azure App Service
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ needs.deploy-infrastructure.outputs.api-app-name }}
+          package: api-deployment.zip
+
+      - name: Configure App Settings
+        run: |
+          # Get storage connection string
+          STORAGE_CONNECTION_STRING=$(az storage account show-connection-string \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name ${{ needs.deploy-infrastructure.outputs.storage-account }} \
+            --query connectionString \
+            --output tsv)
+          
+          # Configure app settings
+          az webapp config appsettings set \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name ${{ needs.deploy-infrastructure.outputs.api-app-name }} \
+            --settings \
+              NODE_ENV=${{ env.ENVIRONMENT }} \
+              WEB_URL=${{ needs.deploy-infrastructure.outputs.web-url }} \
+              API_URL=${{ needs.deploy-infrastructure.outputs.api-url }} \
+              AZURE_STORAGE_CONNECTION_STRING="$STORAGE_CONNECTION_STRING" \
+              AZURE_STORAGE_CONTAINER_NAME="timecap-media" \
+              STORAGE_PROVIDER="azure"
+
+      - name: Run Database Migrations
+        run: |
+          az webapp ssh \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name ${{ needs.deploy-infrastructure.outputs.api-app-name }} \
+            --command "cd /home/site/wwwroot && npm run db:deploy"
+
+  deploy-web:
+    name: Deploy Web App
+    runs-on: ubuntu-latest
+    needs: [deploy-infrastructure, deploy-api]
+    environment: development
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Web App
+        env:
+          VITE_API_URL: ${{ needs.deploy-infrastructure.outputs.api-url }}
+          VITE_APP_NAME: 'TimeCap'
+          VITE_ENVIRONMENT: ${{ env.ENVIRONMENT }}
+        run: |
+          cd apps/web
+          npm run build
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy to Azure App Service
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ needs.deploy-infrastructure.outputs.web-app-name }}
+          package: apps/web/dist
+
+      - name: Configure App Settings
+        run: |
+          az webapp config appsettings set \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name ${{ needs.deploy-infrastructure.outputs.web-app-name }} \
+            --settings \
+              NODE_ENV=${{ env.ENVIRONMENT }} \
+              API_URL=${{ needs.deploy-infrastructure.outputs.api-url }}
+
+  health-check:
+    name: Health Check
+    runs-on: ubuntu-latest
+    needs: [deploy-infrastructure, deploy-api, deploy-web]
+
+    steps:
+      - name: Wait for services to start
+        run: sleep 60
+
+      - name: Check API Health
+        run: |
+          for i in {1..10}; do
+            if curl -f "${{ needs.deploy-infrastructure.outputs.api-url }}/health"; then
+              echo "API health check passed"
+              break
+            fi
+            echo "API health check failed, attempt $i/10"
+            sleep 30
+          done
+
+      - name: Check Web App
+        run: |
+          for i in {1..10}; do
+            if curl -f "${{ needs.deploy-infrastructure.outputs.web-url }}"; then
+              echo "Web app health check passed"
+              break
+            fi
+            echo "Web app health check failed, attempt $i/10"
+            sleep 30
+          done
+
+      - name: Run smoke tests
+        run: |
+          # Test API endpoints
+          curl -f "${{ needs.deploy-infrastructure.outputs.api-url }}/api/auth/health" || exit 1
+          
+          # Test web app loads
+          response=$(curl -s -o /dev/null -w "%{http_code}" "${{ needs.deploy-infrastructure.outputs.web-url }}")
+          if [ $response -ne 200 ]; then
+            echo "Web app returned HTTP $response"
+            exit 1
+          fi
+
+  notify:
+    name: Notify Deployment
+    runs-on: ubuntu-latest
+    needs: [deploy-infrastructure, deploy-api, deploy-web, health-check]
+    if: always()
+
+    steps:
+      - name: Notify Success
+        if: needs.health-check.result == 'success'
+        run: |
+          echo "✅ Development deployment successful!"
+          echo "🌐 Web App: ${{ needs.deploy-infrastructure.outputs.web-url }}"
+          echo "🔌 API: ${{ needs.deploy-infrastructure.outputs.api-url }}"
+
+      - name: Notify Failure
+        if: failure()
+        run: |
+          echo "❌ Development deployment failed!"
+          echo "Check the logs for more details."
