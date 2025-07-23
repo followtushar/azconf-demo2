@@ -23,32 +23,67 @@ const envSchema = z.object({
   REFRESH_TOKEN_EXPIRES_IN: z.string().default('30d'),
   
   // Storage
-  STORAGE_PROVIDER: z.enum(['local', 'aws', 'azure', 'gcp']).default('local'),
+  STORAGE_PROVIDER: z.enum(['local', 'azure', 'aws', 'gcp']).default('azure'),
   STORAGE_PATH: z.string().default('./uploads'),
   
-  // AWS S3
-  AWS_ACCESS_KEY_ID: z.string().optional(),
-  AWS_SECRET_ACCESS_KEY: z.string().optional(),
-  AWS_REGION: z.string().default('us-east-1'),
-  AWS_S3_BUCKET: z.string().optional(),
+  // Azure Storage
+  AZURE_STORAGE_ACCOUNT_NAME: z.string().optional(),
+  AZURE_STORAGE_ACCOUNT_KEY: z.string().optional(),
+  AZURE_STORAGE_CONNECTION_STRING: z.string().optional(),
+  AZURE_STORAGE_CONTAINER_NAME: z.string().default('timecap-media'),
+  AZURE_STORAGE_SAS_TOKEN: z.string().optional(),
+  AZURE_CDN_ENDPOINT: z.string().optional(),
   
-  // Email
-  SENDGRID_API_KEY: z.string().optional(),
+  // Azure Communication Services - Email
+  AZURE_COMMUNICATION_CONNECTION_STRING: z.string().optional(),
+  AZURE_COMMUNICATION_EMAIL_ENDPOINT: z.string().optional(),
   FROM_EMAIL: z.string().email().default('noreply@timecap.app'),
   FROM_NAME: z.string().default('TimeCap'),
   
-  // SMS
-  TWILIO_ACCOUNT_SID: z.string().optional(),
-  TWILIO_AUTH_TOKEN: z.string().optional(),
-  TWILIO_PHONE_NUMBER: z.string().optional(),
+  // Azure Communication Services - SMS
+  AZURE_COMMUNICATION_SMS_CONNECTION_STRING: z.string().optional(),
+  AZURE_COMMUNICATION_PHONE_NUMBER: z.string().optional(),
+  
+  // Azure Notification Hubs
+  AZURE_NOTIFICATION_HUB_CONNECTION_STRING: z.string().optional(),
+  AZURE_NOTIFICATION_HUB_NAME: z.string().optional(),
   
   // OAuth
+  AZURE_AD_CLIENT_ID: z.string().optional(),
+  AZURE_AD_CLIENT_SECRET: z.string().optional(),
+  AZURE_AD_TENANT_ID: z.string().optional(),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
-  FACEBOOK_APP_ID: z.string().optional(),
-  FACEBOOK_APP_SECRET: z.string().optional(),
   GITHUB_CLIENT_ID: z.string().optional(),
   GITHUB_CLIENT_SECRET: z.string().optional(),
+  
+  // Azure Key Vault
+  AZURE_KEY_VAULT_URL: z.string().optional(),
+  AZURE_CLIENT_ID: z.string().optional(),
+  AZURE_CLIENT_SECRET: z.string().optional(),
+  AZURE_TENANT_ID: z.string().optional(),
+  
+  // Azure Application Insights
+  AZURE_APPLICATION_INSIGHTS_CONNECTION_STRING: z.string().optional(),
+  AZURE_APPLICATION_INSIGHTS_INSTRUMENTATION_KEY: z.string().optional(),
+  
+  // Azure Service Bus
+  AZURE_SERVICE_BUS_CONNECTION_STRING: z.string().optional(),
+  AZURE_SERVICE_BUS_QUEUE_NAME: z.string().default('timecap-jobs'),
+  
+  // Azure Database for PostgreSQL
+  AZURE_POSTGRES_HOST: z.string().optional(),
+  AZURE_POSTGRES_USER: z.string().optional(),
+  AZURE_POSTGRES_PASSWORD: z.string().optional(),
+  AZURE_POSTGRES_DATABASE: z.string().default('timecap'),
+  AZURE_POSTGRES_PORT: z.coerce.number().default(5432),
+  AZURE_POSTGRES_SSL_MODE: z.string().default('require'),
+  
+  // Azure Cache for Redis
+  AZURE_REDIS_HOST: z.string().optional(),
+  AZURE_REDIS_PORT: z.coerce.number().default(6380),
+  AZURE_REDIS_PASSWORD: z.string().optional(),
+  AZURE_REDIS_SSL: z.coerce.boolean().default(true),
   
   // Encryption
   ENCRYPTION_KEY: z.string().length(32),
@@ -69,6 +104,8 @@ const envSchema = z.object({
   
   // Logging
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
+  AZURE_LOG_ANALYTICS_WORKSPACE_ID: z.string().optional(),
+  AZURE_LOG_ANALYTICS_SHARED_KEY: z.string().optional(),
 });
 
 // Parse and validate environment variables
@@ -92,10 +129,24 @@ export const config = {
   
   database: {
     url: env.DATABASE_URL,
+    azure: {
+      host: env.AZURE_POSTGRES_HOST,
+      user: env.AZURE_POSTGRES_USER,
+      password: env.AZURE_POSTGRES_PASSWORD,
+      database: env.AZURE_POSTGRES_DATABASE,
+      port: env.AZURE_POSTGRES_PORT,
+      sslMode: env.AZURE_POSTGRES_SSL_MODE,
+    },
   },
   
   redis: {
     url: env.REDIS_URL,
+    azure: {
+      host: env.AZURE_REDIS_HOST,
+      port: env.AZURE_REDIS_PORT,
+      password: env.AZURE_REDIS_PASSWORD,
+      ssl: env.AZURE_REDIS_SSL,
+    },
   },
   
   jwt: {
@@ -108,38 +159,70 @@ export const config = {
   storage: {
     provider: env.STORAGE_PROVIDER,
     path: env.STORAGE_PATH,
-    aws: {
-      accessKeyId: env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
-      region: env.AWS_REGION,
-      bucket: env.AWS_S3_BUCKET,
+    azure: {
+      accountName: env.AZURE_STORAGE_ACCOUNT_NAME,
+      accountKey: env.AZURE_STORAGE_ACCOUNT_KEY,
+      connectionString: env.AZURE_STORAGE_CONNECTION_STRING,
+      containerName: env.AZURE_STORAGE_CONTAINER_NAME,
+      sasToken: env.AZURE_STORAGE_SAS_TOKEN,
+      cdnEndpoint: env.AZURE_CDN_ENDPOINT,
     },
   },
   
-  email: {
-    sendgridApiKey: env.SENDGRID_API_KEY,
-    fromEmail: env.FROM_EMAIL,
-    fromName: env.FROM_NAME,
+  communication: {
+    email: {
+      connectionString: env.AZURE_COMMUNICATION_CONNECTION_STRING,
+      endpoint: env.AZURE_COMMUNICATION_EMAIL_ENDPOINT,
+      fromEmail: env.FROM_EMAIL,
+      fromName: env.FROM_NAME,
+    },
+    sms: {
+      connectionString: env.AZURE_COMMUNICATION_SMS_CONNECTION_STRING,
+      phoneNumber: env.AZURE_COMMUNICATION_PHONE_NUMBER,
+    },
   },
   
-  sms: {
-    twilioAccountSid: env.TWILIO_ACCOUNT_SID,
-    twilioAuthToken: env.TWILIO_AUTH_TOKEN,
-    twilioPhoneNumber: env.TWILIO_PHONE_NUMBER,
+  notifications: {
+    azure: {
+      connectionString: env.AZURE_NOTIFICATION_HUB_CONNECTION_STRING,
+      hubName: env.AZURE_NOTIFICATION_HUB_NAME,
+    },
   },
   
   oauth: {
+    azureAd: {
+      clientId: env.AZURE_AD_CLIENT_ID,
+      clientSecret: env.AZURE_AD_CLIENT_SECRET,
+      tenantId: env.AZURE_AD_TENANT_ID,
+    },
     google: {
       clientId: env.GOOGLE_CLIENT_ID,
       clientSecret: env.GOOGLE_CLIENT_SECRET,
     },
-    facebook: {
-      appId: env.FACEBOOK_APP_ID,
-      appSecret: env.FACEBOOK_APP_SECRET,
-    },
     github: {
       clientId: env.GITHUB_CLIENT_ID,
       clientSecret: env.GITHUB_CLIENT_SECRET,
+    },
+  },
+  
+  azure: {
+    keyVault: {
+      url: env.AZURE_KEY_VAULT_URL,
+      clientId: env.AZURE_CLIENT_ID,
+      clientSecret: env.AZURE_CLIENT_SECRET,
+      tenantId: env.AZURE_TENANT_ID,
+    },
+    applicationInsights: {
+      connectionString: env.AZURE_APPLICATION_INSIGHTS_CONNECTION_STRING,
+      instrumentationKey: env.AZURE_APPLICATION_INSIGHTS_INSTRUMENTATION_KEY,
+    },
+    serviceBus: {
+      connectionString: env.AZURE_SERVICE_BUS_CONNECTION_STRING,
+      queueName: env.AZURE_SERVICE_BUS_QUEUE_NAME,
+    },
+    logAnalytics: {
+      workspaceId: env.AZURE_LOG_ANALYTICS_WORKSPACE_ID,
+      sharedKey: env.AZURE_LOG_ANALYTICS_SHARED_KEY,
     },
   },
   

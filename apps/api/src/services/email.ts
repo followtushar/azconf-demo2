@@ -1,11 +1,13 @@
-import sgMail from '@sendgrid/mail';
+import { EmailClient } from '@azure/communication-email';
 import { config } from '@/config';
 import { logger } from '@/utils/logger';
 
 export class EmailService {
+  private emailClient: EmailClient | null = null;
+
   constructor() {
-    if (config.email.sendgridApiKey) {
-      sgMail.setApiKey(config.email.sendgridApiKey);
+    if (config.communication.email.connectionString) {
+      this.emailClient = new EmailClient(config.communication.email.connectionString);
     }
   }
 
@@ -15,18 +17,19 @@ export class EmailService {
   async sendVerificationEmail(email: string, token: string): Promise<void> {
     const verificationUrl = `${config.web.url}/verify-email?token=${token}`;
     
-    const msg = {
-      to: email,
-      from: {
-        email: config.email.fromEmail,
-        name: config.email.fromName,
+    const emailMessage = {
+      senderAddress: config.communication.email.fromEmail,
+      content: {
+        subject: 'Verify Your TimeCap Account',
+        html: this.getVerificationEmailTemplate(verificationUrl),
+        plainText: `Please verify your email by clicking this link: ${verificationUrl}`,
       },
-      subject: 'Verify Your TimeCap Account',
-      html: this.getVerificationEmailTemplate(verificationUrl),
-      text: `Please verify your email by clicking this link: ${verificationUrl}`,
+      recipients: {
+        to: [{ address: email }],
+      },
     };
 
-    await this.sendEmail(msg);
+    await this.sendEmail(emailMessage);
   }
 
   /**
@@ -35,18 +38,19 @@ export class EmailService {
   async sendPasswordResetEmail(email: string, token: string): Promise<void> {
     const resetUrl = `${config.web.url}/reset-password?token=${token}`;
     
-    const msg = {
-      to: email,
-      from: {
-        email: config.email.fromEmail,
-        name: config.email.fromName,
+    const emailMessage = {
+      senderAddress: config.communication.email.fromEmail,
+      content: {
+        subject: 'Reset Your TimeCap Password',
+        html: this.getPasswordResetEmailTemplate(resetUrl),
+        plainText: `Reset your password by clicking this link: ${resetUrl}`,
       },
-      subject: 'Reset Your TimeCap Password',
-      html: this.getPasswordResetEmailTemplate(resetUrl),
-      text: `Reset your password by clicking this link: ${resetUrl}`,
+      recipients: {
+        to: [{ address: email }],
+      },
     };
 
-    await this.sendEmail(msg);
+    await this.sendEmail(emailMessage);
   }
 
   /**
@@ -58,18 +62,19 @@ export class EmailService {
     capsuleUrl: string,
     senderName: string
   ): Promise<void> {
-    const msg = {
-      to: email,
-      from: {
-        email: config.email.fromEmail,
-        name: config.email.fromName,
+    const emailMessage = {
+      senderAddress: config.communication.email.fromEmail,
+      content: {
+        subject: `Time Capsule: "${capsuleTitle}" has been delivered!`,
+        html: this.getCapsuleDeliveryEmailTemplate(capsuleTitle, capsuleUrl, senderName),
+        plainText: `Your time capsule "${capsuleTitle}" from ${senderName} has been delivered! View it at: ${capsuleUrl}`,
       },
-      subject: `Time Capsule: "${capsuleTitle}" has been delivered!`,
-      html: this.getCapsuleDeliveryEmailTemplate(capsuleTitle, capsuleUrl, senderName),
-      text: `Your time capsule "${capsuleTitle}" from ${senderName} has been delivered! View it at: ${capsuleUrl}`,
+      recipients: {
+        to: [{ address: email }],
+      },
     };
 
-    await this.sendEmail(msg);
+    await this.sendEmail(emailMessage);
   }
 
   /**
@@ -81,34 +86,41 @@ export class EmailService {
     deliveryDate: Date,
     daysRemaining: number
   ): Promise<void> {
-    const msg = {
-      to: email,
-      from: {
-        email: config.email.fromEmail,
-        name: config.email.fromName,
+    const emailMessage = {
+      senderAddress: config.communication.email.fromEmail,
+      content: {
+        subject: `Reminder: Your time capsule "${capsuleTitle}" delivers in ${daysRemaining} days`,
+        html: this.getCapsuleReminderEmailTemplate(capsuleTitle, deliveryDate, daysRemaining),
+        plainText: `Reminder: Your time capsule "${capsuleTitle}" will be delivered on ${deliveryDate.toLocaleDateString()} (${daysRemaining} days remaining).`,
       },
-      subject: `Reminder: Your time capsule "${capsuleTitle}" delivers in ${daysRemaining} days`,
-      html: this.getCapsuleReminderEmailTemplate(capsuleTitle, deliveryDate, daysRemaining),
-      text: `Reminder: Your time capsule "${capsuleTitle}" will be delivered on ${deliveryDate.toLocaleDateString()} (${daysRemaining} days remaining).`,
+      recipients: {
+        to: [{ address: email }],
+      },
     };
 
-    await this.sendEmail(msg);
+    await this.sendEmail(emailMessage);
   }
 
   /**
-   * Send email using SendGrid or fallback
+   * Send email using Azure Communication Services
    */
-  private async sendEmail(msg: any): Promise<void> {
+  private async sendEmail(emailMessage: any): Promise<void> {
     try {
-      if (config.email.sendgridApiKey) {
-        await sgMail.send(msg);
-        logger.info(`Email sent via SendGrid to: ${msg.to}`);
+      if (this.emailClient) {
+        const poller = await this.emailClient.beginSend(emailMessage);
+        const result = await poller.pollUntilDone();
+        
+        if (result.status === 'Succeeded') {
+          logger.info(`Email sent successfully to: ${emailMessage.recipients.to[0].address}`);
+        } else {
+          throw new Error(`Email sending failed with status: ${result.status}`);
+        }
       } else {
         // In development, just log the email
-        logger.info('Email would be sent:', {
-          to: msg.to,
-          subject: msg.subject,
-          content: msg.text,
+        logger.info('Email would be sent (Azure Communication Services not configured):', {
+          to: emailMessage.recipients.to[0].address,
+          subject: emailMessage.content.subject,
+          content: emailMessage.content.plainText,
         });
       }
     } catch (error) {
@@ -129,7 +141,7 @@ export class EmailService {
         <title>Verify Your Email</title>
       </head>
       <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+        <div style="background: linear-gradient(135deg, #0ea5e9 0%, #d946ef 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
           <h1 style="color: white; margin: 0; font-size: 28px;">Welcome to TimeCap!</h1>
         </div>
         
@@ -139,7 +151,7 @@ export class EmailService {
           <p>Thank you for joining TimeCap! To complete your registration and start creating time capsules, please verify your email address.</p>
           
           <div style="text-align: center; margin: 30px 0;">
-            <a href="${verificationUrl}" style="background: #667eea; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">Verify Email Address</a>
+            <a href="${verificationUrl}" style="background: #0ea5e9; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">Verify Email Address</a>
           </div>
           
           <p>If the button doesn't work, copy and paste this link into your browser:</p>
@@ -170,7 +182,7 @@ export class EmailService {
         <title>Reset Your Password</title>
       </head>
       <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+        <div style="background: linear-gradient(135deg, #0ea5e9 0%, #d946ef 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
           <h1 style="color: white; margin: 0; font-size: 28px;">Password Reset</h1>
         </div>
         
@@ -180,7 +192,7 @@ export class EmailService {
           <p>We received a request to reset your TimeCap account password. Click the button below to create a new password.</p>
           
           <div style="text-align: center; margin: 30px 0;">
-            <a href="${resetUrl}" style="background: #667eea; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">Reset Password</a>
+            <a href="${resetUrl}" style="background: #0ea5e9; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">Reset Password</a>
           </div>
           
           <p>If the button doesn't work, copy and paste this link into your browser:</p>
@@ -211,7 +223,7 @@ export class EmailService {
         <title>Time Capsule Delivered!</title>
       </head>
       <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+        <div style="background: linear-gradient(135deg, #0ea5e9 0%, #d946ef 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
           <h1 style="color: white; margin: 0; font-size: 28px;">🎉 Time Capsule Delivered!</h1>
         </div>
         
@@ -221,7 +233,7 @@ export class EmailService {
           <p>Great news! A time capsule from <strong>${senderName}</strong> has been delivered and is now ready to open.</p>
           
           <div style="text-align: center; margin: 30px 0;">
-            <a href="${capsuleUrl}" style="background: #667eea; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">Open Time Capsule</a>
+            <a href="${capsuleUrl}" style="background: #0ea5e9; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">Open Time Capsule</a>
           </div>
           
           <p>This special moment has been waiting for you. Click the button above to experience the message that was carefully preserved for this moment in time.</p>
@@ -251,7 +263,7 @@ export class EmailService {
         <title>Time Capsule Reminder</title>
       </head>
       <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+        <div style="background: linear-gradient(135deg, #0ea5e9 0%, #d946ef 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
           <h1 style="color: white; margin: 0; font-size: 28px;">⏰ Time Capsule Reminder</h1>
         </div>
         
@@ -260,7 +272,7 @@ export class EmailService {
           
           <p>Your time capsule is scheduled to be delivered in <strong>${daysRemaining} day${daysRemaining === 1 ? '' : 's'}</strong>!</p>
           
-          <div style="background: white; padding: 20px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #667eea;">
+          <div style="background: white; padding: 20px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #0ea5e9;">
             <p style="margin: 0;"><strong>Delivery Date:</strong> ${deliveryDate.toLocaleDateString('en-US', { 
               weekday: 'long', 
               year: 'numeric', 

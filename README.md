@@ -1,6 +1,6 @@
 # TimeCap - Time Capsule App 🕰️
 
-A modern time capsule application that allows users to record and schedule audio/video messages for future delivery to loved ones or themselves.
+A modern time capsule application that allows users to record and schedule audio/video messages for future delivery to loved ones or themselves. Built with Azure cloud services for enterprise-grade scalability and security.
 
 ## 🎯 Features
 
@@ -21,23 +21,30 @@ A modern time capsule application that allows users to record and schedule audio
 
 ### Backend
 - **API**: Node.js with Express and TypeScript
-- **Database**: PostgreSQL with Prisma ORM
-- **Storage**: AWS S3 compatible storage for media files
-- **Queue**: Redis for job scheduling and caching
-- **Auth**: JWT with social login support
+- **Database**: Azure Database for PostgreSQL with Prisma ORM
+- **Storage**: Azure Blob Storage for media files with CDN
+- **Queue**: Azure Service Bus for job scheduling
+- **Auth**: JWT with Azure AD and social login support
 
-### Infrastructure
-- **Containerized**: Docker for development and deployment
-- **Cloud Ready**: Supports AWS, Azure, and GCP deployment
-- **Monitoring**: Health checks and logging
+### Azure Services
+- **App Service**: Web and API hosting
+- **Azure Database for PostgreSQL**: Primary database
+- **Azure Cache for Redis**: Caching and session storage
+- **Azure Blob Storage**: Media file storage
+- **Azure CDN**: Content delivery network
+- **Azure Communication Services**: Email and SMS
+- **Azure Service Bus**: Message queuing
+- **Azure Key Vault**: Secrets management
+- **Application Insights**: Monitoring and analytics
+- **Azure Notification Hubs**: Push notifications
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 - Node.js 18+
+- Azure CLI
 - Docker and Docker Compose
-- PostgreSQL (or use Docker)
-- Redis (or use Docker)
+- Azure subscription (for production)
 
 ### Development Setup
 
